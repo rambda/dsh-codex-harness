@@ -58,7 +58,7 @@ function facade(target, overrides) {
   } })
 }
 
-export function apply(ctx, config = {}) {
+export async function apply(ctx, config = {}) {
   const selection = new AsyncLocalStorage()
   const presetBridge = installPresetBridge(ctx)
   const host = ctx.codexAgentTypes
@@ -93,7 +93,10 @@ export function apply(ctx, config = {}) {
         })
       },
     })
-    applyNative(facade(ctx, { tools }), {
+    // DSH 0.2's native delegation plugin applies asynchronously (it registers
+    // its tools after an await), so this adapter must await it before returning
+    // or the outer plugin appears to have registered nothing.
+    await applyNative(facade(ctx, { tools }), {
       provider,
       toolName,
       backgroundMode: 'continuable',

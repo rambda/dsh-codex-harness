@@ -539,13 +539,27 @@ function settled(proc) {
   )
 }
 
-/** Wait until the process settles or the deadline passes. */
+/**
+ * Wait until the process settles or the deadline passes.
+ *
+ * DSH 0.2's bash executor is *explicit-completion*: `proc.status` starts as
+ * 'running' and is only mutated inside the `proc.done` resolution callback.
+ * Polling `status` therefore never observes completion on its own — the loop
+ * must race `proc.done` against the deadline. (The DSH 0.1 shape pushed status
+ * transitions eagerly, which is why a pure `settled()` poll used to work.)
+ */
 async function waitSettled(proc, deadline) {
   for (;;) {
-    if (settled(proc)) return proc.status
+    if (settled(proc)) {
+      await settleAndSync(proc)
+      return proc.status
+    }
     if (Date.now() >= deadline) return undefined
     const race = await Promise.race([proc.done.then(() => 'settled'), pause().then(() => 'tick')])
-    if (race === 'settled') return proc.status
+    if (race === 'settled') {
+      await settleAndSync(proc)
+      return proc.status
+    }
   }
 }
 
@@ -553,10 +567,25 @@ async function waitSettled(proc, deadline) {
 async function checkProcessResult(proc) {
   try {
     await proc.done
+    // DSH 0.2 flips `status` to 'completed' before it populates `exitCode`;
+    // awaiting `result()` is what settles the code. Reading `proc.exitCode`
+    // without this hop yields null and silently drops the exit_code field.
     if (typeof proc.result === 'function') await proc.result()
   } catch (error) {
     throw new Error(formatExecCommandFailure(error))
   }
+}
+
+/**
+ * Settle a process and make sure its exit code is observable.
+ *
+ * On DSH 0.2 `proc.status` becomes terminal before `proc.exitCode` is
+ * assigned, so `await checkProcessResult(proc)` must run before any read of
+ * `proc.exitCode`. Callers that skip this see `null` for fast commands.
+ */
+async function settleAndSync(proc) {
+  if (!settled(proc)) return
+  await checkProcessResult(proc)
 }
 
 async function stopProcess(proc) {
@@ -732,7 +761,10 @@ function registerExecCommand(ctx, config) {
         exec.signal.throwIfAborted()
         const buffer = jobOutputBuffer
         const deadlineEnd = Date.now() + yieldMs
-        while (!settled(proc)) {
+        // `waitSettled` owns completion detection (it races proc.done); a bare
+        // `settled(proc)` guard here would spin until the yield deadline even
+        // for a command that already finished.
+        for (;;) {
           drainOutput(proc, buffer)
           const status = await waitSettled(proc, deadlineEnd)
           if (status !== undefined) break
@@ -872,7 +904,9 @@ function registerExecCommand(ctx, config) {
       const buffer = new HeadTailBuffer(config.maxOutputBytes ?? UNIFIED_EXEC_OUTPUT_MAX_BYTES)
       // The buffer accumulates only the NEW output for this call.
       const deadlineEnd = Date.now() + yieldMs
-      while (!settled(session.proc)) {
+      // Same explicit-completion rule as exec_command: let waitSettled race
+      // proc.done rather than polling a status that only moves after `done`.
+      for (;;) {
         drainOutput(session.proc, buffer, session)
         const status = await waitSettled(session.proc, deadlineEnd)
         if (status !== undefined) break

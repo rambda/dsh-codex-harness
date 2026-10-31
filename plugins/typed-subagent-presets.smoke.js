@@ -6,7 +6,10 @@ import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { Context } from '@deepseek-ai/cordis'
 import Loader from '@deepseek-ai/cordis-plugin-loader'
-import AgentPresets from '@deepseek-ai/dsh-agent-presets'
+// The preset registry ships as `@deepseek-ai/dsh-agent-preset-registry`
+// (singular "preset"); the plural `dsh-agent-presets` never existed, so this
+// import used to fail with ERR_MODULE_NOT_FOUND before the suite could run.
+import AgentPresets from '@deepseek-ai/dsh-agent-preset-registry'
 import AgentRegistry from '@deepseek-ai/dsh-agent'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'

@@ -6,7 +6,11 @@ import { Context, resolveConfig } from '@deepseek-ai/cordis'
 import AgentRegistry from '@deepseek-ai/dsh-agent'
 import AgentLoop from '@deepseek-ai/dsh-agent-loop'
 import Sessions from '@deepseek-ai/dsh-session'
-import Persistence from '@deepseek-ai/dsh-session-persistence-jsonl'
+// DSH 0.1 exported this package as a default constructor; 0.2 publishes the
+// named `{ name, Config, apply }` row shape with no default export. Mount it
+// synchronously in either shape so the persistence service exists before the
+// agent loop opens the fixture session.
+import * as PersistenceModule from '@deepseek-ai/dsh-session-persistence-jsonl'
 import Projections from '@deepseek-ai/dsh-session-projection'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import Tools from '@deepseek-ai/dsh-tools'
@@ -21,6 +25,15 @@ const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-notes-integration-'))
 const previous = process.env.DSH_CODEX_CONTEXT_DIR
 process.env.DSH_CODEX_CONTEXT_DIR = path.join(root, 'notes')
 const ctx = new Context()
+/** Mount the session store in whichever export shape the running DSH provides. */
+function mountPersistence(context, config) {
+  const plugin = PersistenceModule.default ?? PersistenceModule
+  // DSH 0.2's row plugin exposes an *async* `apply` that registers its write
+  // effects on a scope, so the returned scope must be awaited before the agent
+  // loop opens a session. `ctx.plugin` awaits it and honours `Config` for both
+  // the namespace form (0.2) and the constructor form (0.1).
+  return context.plugin(plugin, config)
+}
 let handle, compactor
 const requests = []
 const text = value => [{ type: 'text', text: value }]
@@ -53,7 +66,7 @@ class Model extends LlmAdapter {
 try {
   new Sessions(ctx)
   new Projections(ctx)
-  new Persistence(ctx, { root: path.join(root, 'sessions'), compression: 'none' })
+  await mountPersistence(ctx, { root: path.join(root, 'sessions'), compression: 'none' })
   new AgentRegistry(ctx)
   new SystemPrompt(ctx, resolveConfig(SystemPrompt, {}))
   new Tools(ctx)

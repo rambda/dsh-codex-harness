@@ -7,7 +7,7 @@ import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import { createScope } from '@deepseek-ai/dsh-scope'
 import { installPresetBridge, withPreset } from './typed-subagent-presets.js'
 
-function fixture(config) {
+async function fixture(config) {
   const tools = new Map(), events = new Map(), requests = [], preflights = [], disposed = []
   const created = [], compositions = []
   const donorPresets = new WeakMap()
@@ -18,8 +18,14 @@ function fixture(config) {
   const ctx = {
     tools: { register(tool) { assert.ok(!tools.has(tool.name)); tools.set(tool.name, tool); return () => tools.delete(tool.name) }, get: name => tools.get(name) },
     subagents: {
+      // DSH 0.2's native delegation plugin resolves the recursion budget through
+      // the service instead of trusting the config value it was handed.
+      resolveMaxDepth: maxDepth => (maxDepth === 'provider-managed' ? undefined : maxDepth),
       getProvider: name => providers.get(name),
       async startContinuable(request) { requests.push(request); await materialize(request.request); return { childId: `child-${requests.length}` } },
+      // DSH 0.2 starts a backgrounded delegation as an "activation" and reads the
+      // durable child id from it; 0.1 only had the continuable/foreground pair.
+      async startActivation(request) { requests.push(request); await materialize(request.request); return { childId: `child-${requests.length}` } },
       async start(provider, request) {
         requests.push({ provider, request })
         await materialize(request)
@@ -44,7 +50,9 @@ function fixture(config) {
       composeFrom(childCtx, donorCtx) { const id = donorPresets.get(donorCtx); if (id) compositions.push(id) },
     },
     sessionProjections: { register() {} },
-    systemPrompt: { section() {}, getSectionOrder: () => 0 },
+    // DSH 0.2's native plugin publishes both a prompt section and a runtime
+    // context block, so the mock mirrors the full systemPrompt surface.
+    systemPrompt: { section() {}, context() {}, getSectionOrder: () => 0, getContextOrder: () => 0 },
     on(event, fn) { const handlers = events.get(event) ?? []; handlers.push(fn); events.set(event, handlers) },
     effect(fn) { return fn() },
     get(name) { return name === 'llm' ? { async resolveCallConfig(options) { preflights.push(options); await Promise.resolve(); if (options.reasoningEffort === 'invalid') throw new Error('unsupported effort') } } : this[name] },
@@ -53,7 +61,7 @@ function fixture(config) {
   async function materialize(request) {
     return ctx.agents.create({ parentAgent: request.parent, meta: { origin: 'subagent', agentPreset: 'parent' }, setup(childCtx) { childCtx.get('agentPresets').composeFrom(childCtx, ctx) } })
   }
-  apply(ctx, config)
+  await apply(ctx, config)
   const exec = { agent: { options: { provider: 'parent', model: 'base', reasoningEffort: 'high' }, session: { requestHeader() {} } }, signal: new AbortController().signal }
   return {
     tools, events, requests, preflights, disposed, providers, ctx, exec, created, compositions,
@@ -68,7 +76,7 @@ function fixture(config) {
   }
 }
 
-const f = fixture()
+const f = await fixture()
 assert.deepEqual([...f.tools.keys()], ['subagent', 'subagent_fork'])
 for (const tool of f.tools.values()) {
   assert.ok(tool.parameters.required.includes('agent_type'))
@@ -84,17 +92,23 @@ await assert.rejects(f.call('worker', { provider: 'rogue' }), /child model selec
 await assert.rejects(f.call('worker', { preset: 'rogue' }), /preset is host-owned/)
 assert.equal(f.requests.length, 0)
 const result = await f.call('explorer')
-assert.equal(result.kind, 'continuable')
+// 0.1 reported backgrounded delegations as `continuable`; 0.2 renamed the kind
+// to `activation`. Both mean "started in the background with a durable child id".
+assert.ok(['continuable', 'activation'].includes(result.kind), `background delegation kind: ${result.kind}`)
 assert.equal(f.requests[0].request.persona, undefined, 'a type carries no role prompt: the caller prompt is the whole startup instruction')
 assert.deepEqual(f.requests[0].request.prompt, [{ type: 'text', text: 'Do the work' }])
 assert.equal(f.requests[0].request.agentOptions, undefined)
 assert.equal(f.requests[0].request.maxDepth, 3)
 assert.equal(f.preflights.length, 0, 'pure inheritance stays native')
-assert.equal((await f.call('reviewer', { run_in_background: false }, 'subagent_fork')).kind, 'foreground')
+const forked = await f.call('reviewer', { run_in_background: false }, 'subagent_fork')
+// 0.2 dropped the foreground/background switch: every delegation is a managed
+// activation returning a durable `subagentId`, so no foreground handle exists to
+// dispose. 0.1 returned `foreground` plus a disposable handle here.
+assert.ok(['foreground', 'activation'].includes(forked.kind), `fork delegation kind: ${forked.kind}`)
 assert.equal(f.requests.at(-1).provider, 'fork')
-assert.equal(f.disposed.length, 1)
+if (forked.kind === 'foreground') assert.equal(f.disposed.length, 1)
 
-const presetTypes = fixture()
+const presetTypes = await fixture()
 presetTypes.setTypes(presetTypes.getTypes().map(type => ({ ...type, ...(type.id === 'worker' ? {} : { preset: type.id }) })))
 await Promise.all([presetTypes.call('explorer'), presetTypes.call('reviewer', { run_in_background: false }, 'subagent_fork'), presetTypes.call('worker')])
 assert.deepEqual(presetTypes.compositions.sort(), ['explorer', 'reviewer'])
@@ -109,7 +123,7 @@ for (const preset of ['', null, 42, 'missing', 'broken']) {
 }
 assert.equal(presetTypes.created.length, 3, 'invalid presets never create a child')
 
-const isolation = fixture()
+const isolation = await fixture()
 const parent = isolation.exec.agent
 await withPreset(isolation.ctx, true, 'selected', parent, async () => {
   await isolation.ctx.agents.create({ parentAgent: parent, meta: { origin: 'other' } })
@@ -161,14 +175,14 @@ await assert.rejects(f.call('invalid'), /unsupported effort/)
 await assert.rejects(f.call('special'), /Unknown agent_type/, 'deleted types cannot run')
 f.providers.get('spawn').capabilities.agentOptions = false
 await assert.rejects(f.call('invalid'), /does not support child agentOptions/)
-assert.throws(() => fixture({ maxDepth: -1 }), /depth/i)
-const cancelled = fixture()
+await assert.rejects(() => fixture({ maxDepth: -1 }), /depth/i)
+const cancelled = await fixture()
 const controller = new AbortController(); controller.abort()
 cancelled.exec.signal = controller.signal
 await assert.rejects(cancelled.call('worker'), /abort/i)
 assert.equal(cancelled.requests.length, 0)
 
-const lifecycle = fixture()
+const lifecycle = await fixture()
 for (const hook of lifecycle.events.get('subagent/provider-removed')) hook('spawn')
 assert.equal(lifecycle.tools.has('subagent'), false)
 for (const hook of lifecycle.events.get('subagent/provider-added')) hook(lifecycle.providers.get('spawn'))
@@ -178,13 +192,13 @@ assert.ok(lifecycle.tools.get('subagent').parameters.required.includes('agent_ty
 const root = new Context()
 new SystemPrompt(root, {})
 new ToolRuntime(root)
-const backing = fixture()
+const backing = await fixture()
 root.provide('subagents', backing.ctx.subagents)
 root.provide('sessionProjections', backing.ctx.sessionProjections)
 root.provide('codexAgentTypes', backing.ctx.codexAgentTypes)
 const key = {}
 const scope = createScope(root, key)
-apply(scope.ctx)
+await apply(scope.ctx)
 assert.equal(root.tools.get('subagent'), undefined, 'typed tools must not leak into Host scope')
 assert.ok(root.tools.get('subagent', key).parameters.required.includes('agent_type'))
 let downstream = 0

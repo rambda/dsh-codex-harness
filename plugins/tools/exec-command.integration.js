@@ -30,6 +30,11 @@ try {
   jobTools.apply(facade, { completionDelivery: 'quiet' })
   apply(facade, { yieldFloorMs: 10 })
   const run = (name, args, signal = new AbortController().signal) => definitions.get(name).execute(args, { agent: owner, signal, callId: name })
+  // NOTE (compat probe): these fixtures are POSIX shell scripts and that is
+  // correct — DSH's LocalBash runs `cmd` through the host shell, which is bash
+  // (git-bash on Windows). `printf` therefore exits 0 on both hosts. Do NOT
+  // "portabilize" these to `node -e ...`: the replaceable-looking `printf` is
+  // fine, while `node -e` fails with exit 127 in the bash that DSH spawns.
   const short = await run('exec_command', { cmd: "printf 'short-output\\n'", yield_time_ms: 3000 })
   assert.equal(short.exit_code, 0); assert.match(short.output, /short-output/); assert.equal(short.session_id, undefined)
   const failed = await run('exec_command', { cmd: "printf 'failure-output\\n' >&2; exit 7", yield_time_ms: 3000 })

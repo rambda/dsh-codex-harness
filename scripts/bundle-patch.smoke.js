@@ -72,9 +72,12 @@ function exportTarget(exportsField, subpath) {
 // `npm pack --dry-run --json` is the authority on what an install receives.
 // `npm` is a shell script/cmd shim, not a spawnable executable on Windows.
 // One whole command string (no args array) keeps the shell path warning-free.
-const packed = JSON.parse(process.platform === 'win32'
+// npm <=10 emits a single-element ARRAY; npm >=11 emits an OBJECT keyed by
+// package name. Accept both so the check does not depend on the npm version.
+const packOutput = JSON.parse(process.platform === 'win32'
   ? execFileSync('npm pack --dry-run --json', { cwd: packageDir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], shell: true })
-  : execFileSync('npm', ['pack', '--dry-run', '--json'], { cwd: packageDir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }))[0]
+  : execFileSync('npm', ['pack', '--dry-run', '--json'], { cwd: packageDir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }))
+const packed = Array.isArray(packOutput) ? packOutput[0] : Object.values(packOutput)[0]
 const shipped = new Set(packed.files.map((file) => file.path.replace(/\\/g, '/')))
 
 const root = mkdtempSync(join(tmpdir(), 'dsh-codex-bundle-patch-'))

@@ -1,7 +1,7 @@
 {
   "name": "dsh-codex-mode",
   "description": "Lightweight Codex-shaped coding tools for DeepSeek Harness: exec_command/write_stdin, apply_patch, view_image, OpenAI model routes, DSH-native collaboration tools, and a Codex-shaped 创造模式 (cordis) preset.",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "license": "MIT",
   "type": "module",
   "main": "plugins/preset-publisher.js",
@@ -81,17 +81,17 @@
   "peerDependencies": {
     "@deepseek-ai/cordis": "*",
     "@deepseek-ai/dsh-tools": "*",
-    "@deepseek-ai/dsh-compaction": "^0.1.5-rc.1",
-    "@deepseek-ai/dsh-compaction-basic": "^0.1.5-rc.1",
-    "@deepseek-ai/dsh-llm": "^0.1.5-rc.1",
-    "@deepseek-ai/dsh-session": "^0.1.5-rc.1",
-    "@deepseek-ai/dsh-tool-subagent": "^0.1.2-rc.1 || ^0.1.5-rc.1",
-    "@deepseek-ai/dsh-scope": "^0.1.2-rc.1 || ^0.1.5-rc.1",
+    "@deepseek-ai/dsh-compaction": "^0.1.5-rc.1 || ^0.2.0-rc.1",
+    "@deepseek-ai/dsh-compaction-basic": "^0.1.5-rc.1 || ^0.2.0-rc.1",
+    "@deepseek-ai/dsh-llm": "^0.1.5-rc.1 || ^0.2.0-rc.1",
+    "@deepseek-ai/dsh-session": "^0.1.5-rc.1 || ^0.2.0-rc.1",
+    "@deepseek-ai/dsh-tool-subagent": "^0.1.2-rc.1 || ^0.1.5-rc.1 || ^0.2.0-rc.1",
+    "@deepseek-ai/dsh-scope": "^0.1.2-rc.1 || ^0.1.5-rc.1 || ^0.2.0-rc.1",
     "@deepseek-ai/schemastery": "*"
   },
   "devDependencies": {
     "@deepseek-ai/dsh-settings": "^0.1.5-rc.1",
-    "@deepseek-ai/dsh-agent-presets": "^0.1.5-rc.1",
+    "@deepseek-ai/dsh-agent-preset-registry": "^0.1.5-rc.1 || ^0.2.0-rc.1",
     "@deepseek-ai/dsh-session-projection": "^0.1.5-rc.1",
     "@deepseek-ai/cordis-plugin-loader": "^1.0.3",
     "playwright": "1.60.0",
