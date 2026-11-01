@@ -45,16 +45,22 @@ const manifest = JSON.parse(readFileSync(join(packageDir, 'package.json'), 'utf8
 function insertRows(text) {
   const rows = []
   let current
+  // Only TOP-LEVEL insert rows count. A declaration row's `plugins:` block also
+  // contains `- id:` lines, indented far deeper; matching on exact indentation
+  // keeps those compositions from being mistaken for rows of this patch.
   for (const line of text.split(/\r?\n/)) {
-    const id = /^\s+- id:\s*(.+?)\s*$/.exec(line)
+    const id = /^ {4}- id:\s*(.+?)\s*$/.exec(line)
     if (id) {
       current = { id: unquote(id[1]) }
       rows.push(current)
       continue
     }
     if (current === undefined) continue
-    const name = /^\s+name:\s*(.+?)\s*$/.exec(line)
+    const name = /^ {6}name:\s*(.+?)\s*$/.exec(line)
     if (name && current.name === undefined) current.name = unquote(name[1])
+    // Declaration rows carry their whole composition inline; record that the
+    // block actually has one so a silently emptied preset cannot ship.
+    if (/^ {8}plugins:\s*$/.test(line)) current.plugins = true
   }
   return rows.filter((row) => row.name !== undefined)
 }
@@ -157,14 +163,30 @@ try {
 
   // 4. Every row's host half must actually ship and be exported, or the boot
   //    fails on import — and a row added without a `files`/`exports` update is
-  //    the same class of install-only breakage.
+  //    the same class of install-only breakage. The one exception is a
+  //    DECLARATION row that mounts an official runtime package instead of this
+  //    one: DSH 0.2 registers agent presets as `@deepseek-ai/dsh-agent-preset`
+  //    rows carrying the composition inline, so those ship nothing here and
+  //    only have to name that package.
   for (const row of rows) {
     const subpath = row.name === manifest.name
       ? '.'
       : row.name.startsWith(`${manifest.name}/`)
         ? `./${row.name.slice(manifest.name.length + 1)}`
         : undefined
-    assert.ok(subpath, `bundle patch row ${row.id} (${row.name}) must mount this package by bare name or bare subpath`)
+    if (subpath === undefined) {
+      assert.equal(
+        row.name,
+        '@deepseek-ai/dsh-agent-preset',
+        `bundle patch row ${row.id} (${row.name}) must mount this package by bare name or bare subpath, ` +
+          'or be an @deepseek-ai/dsh-agent-preset declaration row',
+      )
+      assert.ok(
+        row.plugins === true,
+        `preset row ${row.id} must declare an inline plugins composition`,
+      )
+      continue
+    }
     const target = exportTarget(manifest.exports, subpath)
     assert.ok(target, `bundle patch row ${row.id} (${row.name}) has no exports["${subpath}"] entry`)
     assert.ok(

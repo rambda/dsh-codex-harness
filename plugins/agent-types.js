@@ -93,15 +93,21 @@ export class CodexAgentTypes extends Service {
     this.listeners = new Set()
     const entry = { types: structuredClone(config.types ?? BUILTIN_TYPES) }
     this.source = () => entry
-    ctx.settings.installSection(ctx, NAMESPACE, Config, entry, {
-      setSource: source => { this.source = source },
-      validate: value => validateTypes(value.types),
-      onChange: () => {
-        for (const listener of this.listeners) {
-          try { Promise.resolve(listener(this.current())).catch(() => {}) } catch { /* Observers cannot veto commits. */ }
-        }
-      },
-    })
+    // DSH 0.2 removed `ctx.settings.installSection`; the settings surface is
+    // declared through config-form rows instead. The agent-types SERVICE and its
+    // HTTP routes are what the typed-subagent adapter reads, so only the settings
+    // form is skipped when the method is absent instead of failing activation.
+    if (typeof ctx.settings?.installSection === 'function') {
+      ctx.settings.installSection(ctx, NAMESPACE, Config, entry, {
+        setSource: source => { this.source = source },
+        validate: value => validateTypes(value.types),
+        onChange: () => {
+          for (const listener of this.listeners) {
+            try { Promise.resolve(listener(this.current())).catch(() => {}) } catch { /* Observers cannot veto commits. */ }
+          }
+        },
+      })
+    }
     for (const path of ['state', 'models', 'presets']) ctx.effect(() => ctx.webServer.register({
       kind: 'exact', path: `/codex-agent-types/api/${path}`,
       handler: (req, res) => this.handle(path, req, res),
@@ -110,8 +116,15 @@ export class CodexAgentTypes extends Service {
   }
 
   current() {
-    const descriptor = this.ctx.settings.describe({ redactSecrets: true }).find(item => item.ns === NAMESPACE)
-    const types = descriptor?.value.types ?? this.source().types
+    // 0.1 returned an array of `{ ns, value, revision }` records; 0.2 reshaped
+    // (and can thin out) this descriptor list, so read it defensively and fall
+    // back to the in-memory source rather than throwing on a shape change.
+    let descriptor
+    try {
+      const described = this.ctx.settings.describe({ redactSecrets: true })
+      descriptor = Array.isArray(described) ? described.find(item => item?.ns === NAMESPACE) : undefined
+    } catch { descriptor = undefined }
+    const types = descriptor?.value?.types ?? this.source().types
     // Normalizing on read is what keeps a legacy `instructions` field out of the
     // client payload and out of the catalog, without a persisted-section rewrite.
     return structuredClone({ revision: descriptor?.revision ?? 0, types: types.map(normalizeType) })

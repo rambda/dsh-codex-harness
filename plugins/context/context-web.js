@@ -1,7 +1,7 @@
 /** Browser-authenticated read-only session context endpoint. Installed once on
  * the host, never in a per-agent preset (where exact routes would collide). */
 import { readContextState } from './context-state.js'
-import z from '@deepseek-ai/schemastery'
+import { z } from 'zod'
 import { budgetFor, notePage, windowsPage } from './context-tools.js'
 
 export const name = 'codex-context-web'

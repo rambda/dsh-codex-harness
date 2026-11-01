@@ -1,7 +1,7 @@
 {
   "name": "dsh-codex-mode",
   "description": "Lightweight Codex-shaped coding tools for DeepSeek Harness: exec_command/write_stdin, apply_patch, view_image, OpenAI model routes, DSH-native collaboration tools, and a Codex-shaped 创造模式 (cordis) preset.",
-  "version": "0.4.2",
+  "version": "0.4.3",
   "license": "MIT",
   "type": "module",
   "main": "plugins/preset-publisher.js",
@@ -79,8 +79,10 @@
     "responses-api"
   ],
   "peerDependencies": {
+    "zod": "^4.4.3",
     "@deepseek-ai/cordis": "*",
     "@deepseek-ai/dsh-tools": "*",
+    "@deepseek-ai/dsh-agent-preset": "^0.1.5-rc.1 || ^0.2.0-rc.1",
     "@deepseek-ai/dsh-compaction": "^0.1.5-rc.1 || ^0.2.0-rc.1",
     "@deepseek-ai/dsh-compaction-basic": "^0.1.5-rc.1 || ^0.2.0-rc.1",
     "@deepseek-ai/dsh-llm": "^0.1.5-rc.1 || ^0.2.0-rc.1",

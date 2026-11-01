@@ -79,3 +79,398 @@
     # rename. Bump `?v=` after editing the file under a running dsh.
     - id: win32-atomic-write-fallback
       name: 'dsh-codex-mode/plugins/win32-atomic-write-fallback.js'
+
+# ── Agent presets (DSH 0.2 native declaration) ─────────────────────────────
+#
+# 0.1 discovered presets by scanning $DSH_HOME/.agent-presets for real
+# directories, which is why `codex-preset-publisher` copies them there. 0.2
+# dropped that scan: the registry only takes presets registered by an
+# `@deepseek-ai/dsh-agent-preset` row, so the same compositions are declared
+# here as rows while the publisher copy stays for 0.1 hosts.
+- insert:
+    # ── codex 工具模式 ── 0.2 declares presets as ordinary rows; the shipped
+    # agent-presets/ directories are the 0.1 delivery shape.
+    - id: codex-preset
+      name: '@deepseek-ai/dsh-agent-preset'
+      config:
+        id: codex
+        name: 'codex 工具模式'
+        description: 'DeepSeek Harness 的轻量编码预设：Codex 风格 exec_command/write_stdin/apply_patch/view_image 工具 + DSH 原生计划（todo_write）/提问（ask_user_question）/子代理（subagent）；终端使用 Git Bash，运行时上下文、审批和压缩沿用 DSH 原生机制。'
+        order: 5
+        plugins:
+          - id: persona
+            name: '@deepseek-ai/dsh-persona'
+            config:
+              prefix: |-
+                You are a precise, pragmatic coding agent running in DeepSeek Harness.
+                Work directly in the user's repository and carry requests through implementation and verification.
+
+                Use `exec_command` and `write_stdin` for terminal work. Use `apply_patch` for file edits. Use `todo_write` to track substantial multi-step work. Use `ask_user_question` only for decisions that genuinely belong to the user. Delegate independent work to a background `subagent` (or `subagent_fork` to inherit this conversation), following up with `send_message`. A fresh subagent receives only its task and configured instructions; a fork inherits the conversation. Provide sufficient context in fresh tasks. Before editing, inspect applicable nested AGENTS.md and AGENTS.override.md instructions. DSH loads both files, with local instructions taking precedence on conflicts. Keep changes focused, inspect existing code before editing, and report test results and remaining limitations clearly.
+
+                Waiting is not idleness. While a command or background job you started is still running, do not end your turn just to wait for it: with an active goal, ending a turn starts an autonomous goal round immediately, so a long command spends the goal's round budget on `job_output` waits instead of progress. Keep the turn alive — use `write_stdin` for terminal sessions and `job_output` (`wait: true`) for native jobs until the work settles — or do independent work in the same turn. End the turn when the objective has advanced, when you need the user, or when there is genuinely nothing left to do.
+
+          - id: codex-context-mode
+            name: 'dsh-codex-mode/plugins/context/context-mode.js'
+
+          - id: codex-context-tools
+            name: 'dsh-codex-mode/plugins/context/context-tools.js'
+
+          - id: agent-instructions
+            name: '@deepseek-ai/dsh-agent-instructions'
+            config:
+              maxBytes: 32768
+              projectRootMarkers: ['.git']
+              instructionFileCandidates: ['AGENTS.md']
+              localInstructionFileCandidates: ['AGENTS.override.md']
+
+          # The host composition may expose a global bash tool. Keep the preset's
+          # terminal surface limited to exec_command/write_stdin where possible.
+          - id: tool-codex-restrict
+            name: 'dsh-codex-mode/plugins/tools/restrict.js'
+
+          - id: exec-terminals
+            name: cordis:group
+            group: true
+            isolate:
+              terminals: true
+            config:
+              - id: pty
+                name: '@deepseek-ai/dsh-terminal'
+
+              - id: terminal-bash
+                name: '@deepseek-ai/dsh-terminal-bash'
+                config:
+                  timeoutMs: 300000
+
+              - id: tool-codex-exec
+                name: 'dsh-codex-mode/plugins/tools/exec-command.js'
+                config:
+                  backendType: shell
+
+          - id: tool-codex-apply-patch
+            name: 'dsh-codex-mode/plugins/tools/apply-patch.js'
+
+          - id: tool-codex-view-image
+            name: 'dsh-codex-mode/plugins/tools/view-image.js'
+
+          - id: tool-jobs
+            name: '@deepseek-ai/dsh-tool-jobs'
+
+          # ── DSH-native collaboration tools ───────────────────────────────────────────
+          # plan / ask-user / delegation are DSH NATIVE tools. The web surface disables
+          # the host rows for them, so the preset mounts them per-session — the same
+          # rows the shipped `code` preset carries: `todo_write` (plan),
+          # `ask_user_question`, `subagent` / `subagent_fork`, `send_message`,
+          # `interrupt_agent`, `list_agents`.
+          - id: tool-todo
+            name: '@deepseek-ai/dsh-tool-todo'
+            config:
+              allowParallelInProgress: true
+
+          - id: tool-ask-user
+            name: '@deepseek-ai/dsh-tool-ask-user'
+
+          - id: tool-subagent-control
+            name: '@deepseek-ai/dsh-tool-subagent-control'
+
+          - id: tool-subagent-list-agents
+            name: '@deepseek-ai/dsh-tool-subagent-control/list-agents'
+
+          - id: codex-typed-subagents
+            name: 'dsh-codex-mode/plugins/typed-subagents.js'
+
+          # ── goals ───────────────────────────────────────────────────────────────────
+          # The web surface disables the host-plane `command-goal` / `tool-goal` rows
+          # (`dsh-web-app` patch, same reason as the skill rows above), so a preset that
+          # wants the goal surface MUST mount both itself. Without them the session has no
+          # `create_goal` / `get_goal` / `update_goal` and no `/goal`: a long-running
+          # objective can never be armed, and a session resumed after a restart has
+          # nothing driving it. The goal service and session driver stay on the host
+          # plane, where the Gateway can resolve them; these two rows register into THIS
+          # preset's scoped layers.
+          - id: command-goal
+            name: '@deepseek-ai/dsh-command-goal'
+
+          - id: tool-goal
+            name: '@deepseek-ai/dsh-tool-goal'
+
+          # DSH-native web_search. The host `tool-web` row is disabled on the web
+          # surface, so presets mount their own; the search provider resolves from the
+          # host (anysearch in this profile). fetch stays off (SSRF-safe, like the
+          # shipped presets).
+          - id: tool-web
+            name: '@deepseek-ai/dsh-tool-web'
+            config:
+              fetch: false
+              searchTimeoutMs: 60000
+
+          # ── skills ──────────────────────────────────────────────────────────────────
+          # The skill REGISTRY (`dsh-skill`) is a host-plane row that the web surface
+          # keeps mounted, so both rows below register into THIS preset's layer of it and
+          # need no realm. `skill-filesystem` contributes local-root discovery — the
+          # project roots (`<projectRoot>/.dsh/skills`, `<projectRoot>/.agents/skills`)
+          # and the user roots (`$DSH_HOME/skills`, `~/.agents/skills`) — and `tool-skill`
+          # gives the agent the catalog plus the loader. Without them the session has no
+          # skill surface at all: no `skill` tool, no catalog, and a `/` in the composer
+          # that lists nothing, because the web menu resolves through `skills/list` and
+          # that call fails when neither the preset nor the host composition mounts the
+          # registry. `codex 创造模式` (codex-creative) has carried these two rows since it
+          # started shipping skills; this preset was simply missing them.
+          - id: skill-filesystem
+            name: '@deepseek-ai/dsh-skill-filesystem'
+
+          - id: tool-skill
+            name: '@deepseek-ai/dsh-tool-skill'
+
+          # ── compaction ──────────────────────────────────────────────────────────────
+          # One Notes-aware owner delegates summary fallback to native DSH compaction. The web surface disables the host-plane rows
+          # (`compaction-basic` / `command-compact` / `tool-result-pruner`), so a preset
+          # that wants compaction MUST mount this group per-session — same shape as the
+          # shipped `code` preset. Without it, `/compact` is not registered at all and
+          # auto-compaction never runs.
+          - id: compaction
+            name: cordis:group
+            group: true
+            isolate:
+              compaction: true
+              toolResultPruner: true
+            config:
+              - id: compaction-basic
+                name: 'dsh-codex-mode/plugins/harness/codex-context-compaction.js'
+
+              - id: command-compact
+                name: '@deepseek-ai/dsh-command-compact'
+
+              - id: tool-result-pruner
+                name: '@deepseek-ai/dsh-compaction-tool-result-pruner'
+                config:
+                  thresholdChars: 8192
+                  headChars: 4096
+                  tailChars: 1024
+
+    # ── codex 创造模式 ── 0.2 declares presets as ordinary rows; the shipped
+    # agent-presets/ directories are the 0.1 delivery shape.
+    - id: codex-creative-preset
+      name: '@deepseek-ai/dsh-agent-preset'
+      config:
+        id: codex-creative
+        name: 'codex 创造模式'
+        description: '基于 Codex 工具模式的 DSH 创造模式：保留 exec_command/write_stdin/apply_patch/view_image，并提供官方创造模式的运行时检查、动态插件、preset 创作指导、计划模式与工作流。'
+        order: 6
+        plugins:
+          - id: persona
+            name: '@deepseek-ai/dsh-persona'
+            config:
+              prefix: |-
+                You are a coding agent powered by the {{model}} model, running on the DeepSeek Harness. Your working directory is {{cwd}}.
+
+                You can read and modify the harness you run on. Its composition is Cordis: every capability is a plugin row in a `cordis.yml`, and an agent preset is one such file mounted for a single session.
+
+                Two planes decide where an edit belongs. The HOST composition holds the registries and anything shared across sessions — persistence, the sandbox and approval stack, the model route, the subagent registry and its backends. An AGENT PRESET holds what one session contributes to those registries: its tools, its persona, its prompt sections. A row that publishes a service belongs in the host composition, or inside an `isolate` realm if the preset genuinely owns that service and nothing outside one agent reads it.
+
+                Presets you author live one directory per preset under `${DSH_HOME:-$HOME/.dsh}/.agent-presets/<id>/`; the roster reports each preset's real path, so take the one you edit from there. NEVER edit or delete the shipped preset install (the `agent-presets` directory beside the deployment's own config): it belongs to the deployment, an upgrade overwrites it, and corrupting the `cordis` preset would disable this very mode. To change what a shipped preset does, copy its composition into a new preset directory and edit the copy.
+
+                This session uses a Codex-shaped tool surface. Use `exec_command` and `write_stdin` for terminal work. Use `apply_patch` for file edits. Use `view_image` for local images. Do not expect DSH `bash`/`pwsh` or `read`/`edit`/`write` tools. Use `todo_write` to track substantial multi-step work. Use `ask_user_question` only for decisions that genuinely belong to the user. Delegate independent work to a background `subagent` (or `subagent_fork` to inherit this conversation), following up with `send_message`.
+
+                Waiting is not idleness. While a command, background job, subagent, or workflow you started is still running, do not end your turn just to wait for it: with an active goal, ending a turn starts an autonomous goal round immediately, so waiting spends the goal's round budget instead of making progress. Keep the turn alive by polling (`job_output` with `wait: true`, `write_stdin`) until the work settles, or do independent work in the same turn. End the turn when the objective has advanced, when you need the user, or when there is genuinely nothing left to do.
+
+                Load the `editing-cordis-compositions` skill before writing or changing a composition. Load the `cordis-plugin-development` skill before creating, modifying, or repairing a dynamic Cordis Plugin.
+
+          - id: agent-instructions
+            name: '@deepseek-ai/dsh-agent-instructions'
+            config:
+              maxBytes: 65536
+              projectRootMarkers: ['.git']
+              instructionFileCandidates: ['AGENTS.md']
+              localInstructionFileCandidates: ['AGENTS.override.md']
+
+          # The host composition may expose a global bash tool. Keep the preset's
+          # terminal surface limited to exec_command/write_stdin where possible.
+          - id: tool-codex-restrict
+            name: 'dsh-codex-mode/plugins/tools/restrict.js'
+
+          - id: exec-terminals
+            name: cordis:group
+            group: true
+            isolate:
+              terminals: true
+            config:
+              - id: pty
+                name: '@deepseek-ai/dsh-terminal'
+
+              - id: terminal-bash
+                name: '@deepseek-ai/dsh-terminal-bash'
+                config:
+                  timeoutMs: 300000
+
+              - id: tool-codex-exec
+                name: 'dsh-codex-mode/plugins/tools/exec-command.js'
+                config:
+                  backendType: shell
+
+          - id: tool-codex-apply-patch
+            name: 'dsh-codex-mode/plugins/tools/apply-patch.js'
+
+          - id: tool-codex-view-image
+            name: 'dsh-codex-mode/plugins/tools/view-image.js'
+
+          # ── background jobs ────────────────────────────────────────────────────────
+          # Only the model-facing controls. The task REGISTRY stays on the host plane.
+          # Workflows, ralph, and continuable subagents collect work through these
+          # controls; exec_command background sessions still use write_stdin.
+          - id: tool-jobs
+            name: '@deepseek-ai/dsh-tool-jobs'
+
+          # ── goals ───────────────────────────────────────────────────────────────────
+          # The goal service and session driver stay on the host plane, where the Gateway
+          # can resolve them. The human command and model-facing tool register into this
+          # preset's scoped layers.
+          - id: command-goal
+            name: '@deepseek-ai/dsh-command-goal'
+
+          - id: tool-goal
+            name: '@deepseek-ai/dsh-tool-goal'
+
+          # ── plan mode ───────────────────────────────────────────────────────────────
+          # Plan state is per-agent by nature, so an entry-local realm is not a
+          # workaround here — it is the correct lifetime.
+          - id: planning
+            name: cordis:group
+            group: true
+            isolate:
+              planMode: true
+            config:
+              - id: plan-mode
+                name: '@deepseek-ai/dsh-plan-mode'
+                config:
+                  section: |
+                        You are in plan mode. Stay in plan mode until exit_plan_mode succeeds or the user switches the session mode. Imperative language to implement changes means plan the implementation, not execute it. A user's conversational agreement — including an answer confirming something you asked — approves nothing and does not end plan mode; fold the confirmed decision into the plan and submit it through exit_plan_mode.
+
+                        Explore first. Use non-mutating reads, searches, static analysis, and checks to ground the plan in the actual repository. Do not edit or write files, change configuration, run formatters or code generation that rewrites tracked files, commit, or otherwise carry out the plan. Prefer existing functions and patterns over new machinery.
+
+                        The tool catalog stays the same across modes for request-cache stability. These plan-mode rules override any later tool description or guidance that suggests using mutation tools; those tools remain listed to keep the tool catalog unchanged. Do not use todo_write to track this planning phase: it tracks implementation after an approved plan, while the plan itself belongs in exit_plan_mode.
+
+                        Resolve discoverable facts by inspection. Use ask_user_question only for user-owned choices or material ambiguity that inspection cannot answer. Do not ask the user where code lives or how current behavior works when you can find out.
+
+                        Make the plan decision-complete: state the goal and success criteria; group implementation changes by subsystem; identify public API, schema, and data-flow changes; cover edge cases, failure modes, tests, acceptance criteria, and explicit assumptions. Keep it concise enough to review but detailed enough that another engineer can implement it without making design decisions.
+
+                        When ready, call exit_plan_mode with the complete plan markdown, starting with a # title. Make exit_plan_mode the only and final tool call in that assistant response: it presents the plan for approval, and implementation begins only in a later step after approval. Do not paste the final plan as a plain reply or ask "should I proceed?" through prose or ask_user_question. If review rejects it, incorporate the feedback and present again. If the review channel is unavailable or aborted, stay in plan mode and ask the user to switch modes manually; do not proceed with implementation.
+
+          # ── compaction ──────────────────────────────────────────────────────────────
+          # Native DSH compaction (manual `/compact` + auto pressure compaction). The
+          # web surface disables the host-plane rows, so a preset that wants compaction
+          # MUST mount this group per-session.
+          - id: compaction
+            name: cordis:group
+            group: true
+            isolate:
+              compaction: true
+              toolResultPruner: true
+            config:
+              - id: compaction-basic
+                name: '@deepseek-ai/dsh-compaction-basic'
+
+              - id: command-compact
+                name: '@deepseek-ai/dsh-command-compact'
+
+              - id: tool-result-pruner
+                name: '@deepseek-ai/dsh-compaction-tool-result-pruner'
+                config:
+                  thresholdChars: 8192
+                  headChars: 4096
+                  tailChars: 1024
+
+          # ── delegation and workflows ────────────────────────────────────────────────
+          # The `subagents` registry and its spawn/fork backends live in the HOST
+          # composition. This preset contributes the delegation TOOLS, which resolve
+          # that host registry.
+          #
+          # `workflows` is different — nothing outside an agent reads it — so every row
+          # that reaches it shares one entry-local realm here.
+          - id: delegation
+            name: cordis:group
+            group: true
+            isolate:
+              workflowEngine: true
+            config:
+              - id: tool-subagent-control
+                name: '@deepseek-ai/dsh-tool-subagent-control'
+
+              - id: tool-subagent-list-agents
+                name: '@deepseek-ai/dsh-tool-subagent-control/list-agents'
+
+              - id: codex-typed-subagents
+                name: 'dsh-codex-mode/plugins/typed-subagents.js'
+
+              # Production dsh does not install these optional providers. Install the
+              # matching Bundle in this Profile and restart the Host, then copy this
+              # preset and remove `disabled` from the matching tool row.
+              - id: tool-subagent-codex
+                name: '@deepseek-ai/dsh-tool-subagent'
+                disabled: true
+                config:
+                  provider: codex
+                  toolName: subagent_codex
+                  backgroundMode: one-shot
+                  maxDepth: provider-managed
+
+              - id: tool-subagent-claude-code
+                name: '@deepseek-ai/dsh-tool-subagent'
+                disabled: true
+                config:
+                  provider: claude-code
+                  toolName: subagent_claude_code
+                  backgroundMode: one-shot
+                  maxDepth: provider-managed
+
+              - id: workflow-worker-thread
+                name: '@deepseek-ai/dsh-workflow-worker-thread'
+                config:
+                  provider: spawn
+
+              - id: tool-workflow
+                name: '@deepseek-ai/dsh-tool-workflow'
+
+              - id: tool-ralph
+                name: '@deepseek-ai/dsh-tool-ralph'
+                config:
+                  subagentProvider: spawn
+                  maxRounds: 64
+
+          # ── remaining model-facing rows ─────────────────────────────────────────────
+
+          - id: tool-ask-user
+            name: '@deepseek-ai/dsh-tool-ask-user'
+
+          - id: tool-todo
+            name: '@deepseek-ai/dsh-tool-todo'
+            config:
+              allowParallelInProgress: true
+
+          # The `web` service and its search provider stay in the host composition; only
+          # the model-facing tool is per-session. fetch matches the shipped `cordis`
+          # preset so plugin-authoring sessions can retrieve remote docs.
+          - id: tool-web
+            name: '@deepseek-ai/dsh-tool-web'
+            config:
+              fetch: true
+              searchTimeoutMs: 60000
+
+          # ── self-modification ───────────────────────────────────────────────────────
+          # Read the live runtime, mount a temporary plugin, unmount it. The toolset is a
+          # trust boundary, not a sandbox — see this file's header.
+          - id: tool-cordis
+            name: '@deepseek-ai/dsh-tool-cordis'
+
+          # The composition-authoring skill travels with this preset rather than living
+          # in the user's skill root: it documents THIS deployment's two planes, and a
+          # preset is the unit that gets copied and edited. `baseUrl` is the preset's
+          # own directory, so the root resolves wherever the preset is installed.
+          - id: skill-filesystem
+            name: '@deepseek-ai/dsh-skill-filesystem'
+            config:
+              customSkillDirs:
+                - !!js "process.getBuiltinModule('node:url').fileURLToPath(new URL('skills/', baseUrl))"
+
+          - id: tool-skill
+            name: '@deepseek-ai/dsh-tool-skill'

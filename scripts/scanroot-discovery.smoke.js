@@ -47,7 +47,11 @@ async function assertLivePreset(id, extraNeedles = []) {
   assert.ok(info.isDirectory(), `${dir} must be a real directory`)
 
   const composition = await readFile(join(dir, 'agent.cordis.yml'), 'utf8')
-  for (const needle of ['id: compaction', 'dsh-compaction-basic', 'dsh-command-compact', ...extraNeedles]) {
+  // The compaction group MUST be present. Its `compaction-basic` row is owned by
+  // this package's Notes-aware implementation (codex-context-compaction.js), not
+  // by the native `@deepseek-ai/dsh-compaction-basic` package, so match the ROW
+  // ID rather than that package name.
+  for (const needle of ['id: compaction', 'id: compaction-basic', 'dsh-command-compact', ...extraNeedles]) {
     assert.ok(composition.includes(needle), `live ${id} composition missing ${needle}`)
   }
   assert.ok(

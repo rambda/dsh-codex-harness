@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.4.3 — 2026-11-01
+
+- Declare the presets for DSH 0.2. 0.2 dropped the `$DSH_HOME/.agent-presets` directory scan and registers presets only through `@deepseek-ai/dsh-agent-preset` rows, so a host that used the publisher copy showed no `codex 工具模式` / `codex 创造模式` at all. Both compositions are now also declared inline as rows in the shipped bundle patch; the directory copy stays for 0.1 hosts.
+- Use Zod for the session-projection schemas. `context-web.js` passed schemastery schemas as the projection `stateSchema` / `wire.viewSchema`, while 0.2's projection service calls `.parse()` on them. Because `codexContextVersion` is registered globally, every session history threw `def.wire.viewSchema.parse is not a function` and failed to load. `zod` is now a declared peer dependency.
+- Tolerate the settings API 0.2 removed. `agent-types.js` called `ctx.settings.installSection` (gone in 0.2), which failed the row's activation and took the `codexAgentTypes` service with it; the service and its HTTP routes now mount without the settings form, and `current()` reads the descriptor list defensively.
+- `bundle-patch.smoke` scans top-level rows by exact indentation (a preset row's inline `plugins:` block also contains `- id:` lines) and accepts `@deepseek-ai/dsh-agent-preset` declaration rows.
+- `scanroot-discovery.smoke` matches the `compaction-basic` ROW ID rather than the native package name, since this package owns that row with its Notes-aware implementation.
+- `context-web.smoke` now runs against the real projection service instead of a mocked `register()`, which is what let the schema defect ship.
+
+Validation on DSH 0.2.1-rc.2: `npm run test` passes; `dsh --profile web --dump-config` composes both preset rows with exit 0.
+
 ## 0.4.2 — 2026-10-31
 
 - Pass the DSH 0.2 installation preflight. Widen the peer ranges to accept the 0.2.0-rc line and replace the nonexistent `@deepseek-ai/dsh-agent-presets` devDependency with `@deepseek-ai/dsh-agent-preset-registry`. Verified against DSH 0.2.1-rc.2: `evaluatePluginCompatibility` reports no issue, so `dsh plugin add` installs instead of rejecting.
